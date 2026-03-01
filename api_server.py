@@ -1,4 +1,3 @@
-# api_server.py
 import io
 import sys
 import os
@@ -25,6 +24,15 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from qwen_tts.inference.qwen3_tts_model import Qwen3TTSModel
 
+# ── device & precision config ─────────────────────────────────────────────────
+# Automatically use CUDA if available, fall back to CPU gracefully.
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Use bfloat16 on CUDA (stable on Ampere+ GPUs like A5000) or float32 on CPU.
+DTYPE = torch.bfloat16 if DEVICE.type == "cuda" else torch.float32
+
+print(f"[device] Using: {DEVICE}  |  dtype: {DTYPE}", flush=True)
+
 # Allow overriding the model repo dir (inside HF cache) via env var
 MODEL_REPO_DIR = os.environ.get(
     "QWEN_TTS_REPO_DIR",
@@ -45,7 +53,7 @@ else:
     MODEL_PATH = snapshots[-1]
 
 # ── app ──────────────────────────────────────────────────────────────────────
-app = FastAPI(title="Qwen3-TTS API", version="0.1.0")
+app = FastAPI(title="Qwen3-TTS API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,13 +68,33 @@ tts: Optional[Qwen3TTSModel] = None
 @app.on_event("startup")
 def load_model():
     global tts
-    print("Loading Qwen3-TTS model …", flush=True)
+    print(f"Loading Qwen3-TTS model on {DEVICE} ({DTYPE}) …", flush=True)
+
     tts = Qwen3TTSModel.from_pretrained(
         MODEL_PATH,
         attn_implementation="eager",
+        torch_dtype=DTYPE,          # load weights directly in target precision
     )
+
+    # Move every sub-module to the target device
+    tts.model.to(device=DEVICE, dtype=DTYPE)
+
+    # Also move the speech tokenizer codec if it exposes a .to() interface
+    if hasattr(tts, "speech_tokenizer") and hasattr(tts.speech_tokenizer, "to"):
+        tts.speech_tokenizer.to(device=DEVICE, dtype=DTYPE)
+
     tts.model.eval()
-    print("Model ready.", flush=True)
+
+    if DEVICE.type == "cuda":
+        allocated = torch.cuda.memory_allocated(DEVICE) / 1024 ** 3
+        reserved  = torch.cuda.memory_reserved(DEVICE)  / 1024 ** 3
+        print(
+            f"Model loaded. VRAM: {allocated:.2f} GB allocated / "
+            f"{reserved:.2f} GB reserved.",
+            flush=True,
+        )
+    else:
+        print("Model loaded on CPU.", flush=True)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -81,8 +109,17 @@ def wav_to_bytes(audio: np.ndarray, sample_rate: int) -> io.BytesIO:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model_loaded": tts is not None}
-
+    info = {
+        "status": "ok",
+        "model_loaded": tts is not None,
+        "device": str(DEVICE),
+        "dtype": str(DTYPE),
+    }
+    if DEVICE.type == "cuda":
+        info["vram_allocated_gb"] = round(torch.cuda.memory_allocated(DEVICE) / 1024 ** 3, 2)
+        info["vram_reserved_gb"]  = round(torch.cuda.memory_reserved(DEVICE)  / 1024 ** 3, 2)
+        info["cuda_device_name"]  = torch.cuda.get_device_name(DEVICE)
+    return info
 
 
 @app.post("/tts/clone")
@@ -116,9 +153,7 @@ async def tts_clone(
     if not x_vector_only and not ref_text.strip():
         raise HTTPException(400, "ref_text is required when x_vector_only=false")
 
-    # save upload to a temp buffer soundfile can read
     audio_bytes = await ref_audio.read()
-    ref_buf = io.BytesIO(audio_bytes)
 
     import tempfile, pathlib
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -126,16 +161,24 @@ async def tts_clone(
         tmp_path = tmp.name
 
     try:
-        wavs, fs = tts.generate_voice_clone(
-            text=text,
-            language=language,
-            ref_audio=tmp_path,
-            ref_text=ref_text if not x_vector_only else None,
-            x_vector_only_mode=x_vector_only,
-            temperature=temperature,
-            top_p=top_p,
-            max_new_tokens=max_new_tokens,
+        # autocast keeps generation in bfloat16 on GPU for speed & VRAM savings;
+        # on CPU it is a no-op (enabled=False).
+        autocast_ctx = torch.amp.autocast(
+            device_type=DEVICE.type,
+            dtype=DTYPE,
+            enabled=(DEVICE.type == "cuda"),
         )
+        with autocast_ctx:
+            wavs, fs = tts.generate_voice_clone(
+                text=text,
+                language=language,
+                ref_audio=tmp_path,
+                ref_text=ref_text if not x_vector_only else None,
+                x_vector_only_mode=x_vector_only,
+                temperature=temperature,
+                top_p=top_p,
+                max_new_tokens=max_new_tokens,
+            )
     finally:
         pathlib.Path(tmp_path).unlink(missing_ok=True)
 
@@ -154,6 +197,8 @@ def info():
         raise HTTPException(503, "Model not loaded yet")
     return {
         "model_type": getattr(tts.model, "tts_model_type", "unknown"),
+        "device": str(DEVICE),
+        "dtype": str(DTYPE),
         "supported_languages": tts.get_supported_languages(),
         "supported_speakers": tts.get_supported_speakers(),
     }
