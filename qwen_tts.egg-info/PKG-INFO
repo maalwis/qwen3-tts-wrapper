@@ -1,0 +1,25 @@
+Metadata-Version: 2.4
+Name: qwen-tts
+Version: 0.1.1
+Summary: Qwen-TTS python package
+Author: Alibaba Qwen Team
+License: Apache-2.0
+Project-URL: Homepage, https://github.com/Qwen/Qwen3-TTS
+Project-URL: Repository, https://github.com/Qwen/Qwen3-TTS
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: transformers==4.57.3
+Requires-Dist: accelerate==1.12.0
+Requires-Dist: gradio
+Requires-Dist: librosa
+Requires-Dist: torchaudio
+Requires-Dist: soundfile
+Requires-Dist: sox
+Requires-Dist: onnxruntime
+Requires-Dist: einops
