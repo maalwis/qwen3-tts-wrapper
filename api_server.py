@@ -57,16 +57,16 @@ CUSTOM_MODEL_PATH = (
     else _resolve_model_path(CUSTOM_REPO_DIR)
 )
 
-# VoiceDesign model
-DESIGN_REPO_DIR = os.environ.get(
-    "QWEN_TTS_DESIGN_REPO_DIR",
-    os.path.join(HF_HOME, "models--Qwen--Qwen3-TTS-12Hz-1.7B-VoiceDesign"),
-)
-DESIGN_MODEL_PATH = (
-    os.path.join(DESIGN_REPO_DIR, "snapshots", os.environ["QWEN_TTS_DESIGN_SNAPSHOT"])
-    if os.environ.get("QWEN_TTS_DESIGN_SNAPSHOT")
-    else _resolve_model_path(DESIGN_REPO_DIR)
-)
+# # VoiceDesign model
+# DESIGN_REPO_DIR = os.environ.get(
+#     "QWEN_TTS_DESIGN_REPO_DIR",
+#     os.path.join(HF_HOME, "models--Qwen--Qwen3-TTS-12Hz-1.7B-VoiceDesign"),
+# )
+# DESIGN_MODEL_PATH = (
+#     os.path.join(DESIGN_REPO_DIR, "snapshots", os.environ["QWEN_TTS_DESIGN_SNAPSHOT"])
+#     if os.environ.get("QWEN_TTS_DESIGN_SNAPSHOT")
+#     else _resolve_model_path(DESIGN_REPO_DIR)
+# )
 
 # ── app ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Qwen3-TTS API", version="0.3.0")
@@ -118,11 +118,11 @@ def load_models():
         tts_custom.model.eval()
         print("Custom-voice model ready.", flush=True)
 
-    elif MODEL_MODE == "design":
-        print("Loading Qwen3-TTS voice-design model …", flush=True)
-        tts_design = Qwen3TTSModel.from_pretrained(DESIGN_MODEL_PATH, attn_implementation="eager")
-        tts_design.model.eval()
-        print("Voice-design model ready.", flush=True)
+    # elif MODEL_MODE == "design":
+    #     print("Loading Qwen3-TTS voice-design model …", flush=True)
+    #     tts_design = Qwen3TTSModel.from_pretrained(DESIGN_MODEL_PATH, attn_implementation="eager")
+    #     tts_design.model.eval()
+    #     print("Voice-design model ready.", flush=True)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -141,7 +141,7 @@ def health():
         "status": "ok",
         "clone_model_loaded": tts_clone is not None,
         "custom_model_loaded": tts_custom is not None,
-        "design_model_loaded": tts_design is not None,
+        # "design_model_loaded": tts_design is not None,
     }
 
 
@@ -255,52 +255,52 @@ async def tts_custom_endpoint(
     )
 
 
-@app.post("/tts/design")
-async def tts_design_endpoint(
-    text: str = Form(...),
-    instruct: str = Form(...),
-    language: str = Form("Auto"),
-    temperature: float = Form(0.9),
-    top_p: float = Form(1.0),
-    max_new_tokens: int = Form(2048),
-):
-    """
-    Voice-design endpoint — describe the desired voice in natural language.
+# @app.post("/tts/design")
+# async def tts_design_endpoint(
+#     text: str = Form(...),
+#     instruct: str = Form(...),
+#     language: str = Form("Auto"),
+#     temperature: float = Form(0.9),
+#     top_p: float = Form(1.0),
+#     max_new_tokens: int = Form(2048),
+# ):
+#     """
+#     Voice-design endpoint — describe the desired voice in natural language.
 
-    Form fields:
-      text          : text to synthesise
-      instruct      : natural-language voice description
-                      e.g. "A calm, deep male voice with a slight British accent"
-      language      : e.g. "Auto", "English", "Chinese"
-      temperature   : sampling temperature
-      top_p         : nucleus sampling
-      max_new_tokens: max codec tokens
-    """
-    if tts_design is None:
-        raise HTTPException(503, "Voice-design model not loaded. Restart with MODEL_MODE=design.")
-    if not text.strip():
-        raise HTTPException(400, "text cannot be empty")
-    if not instruct.strip():
-        raise HTTPException(400, "instruct cannot be empty — describe the voice you want")
+#     Form fields:
+#       text          : text to synthesise
+#       instruct      : natural-language voice description
+#                       e.g. "A calm, deep male voice with a slight British accent"
+#       language      : e.g. "Auto", "English", "Chinese"
+#       temperature   : sampling temperature
+#       top_p         : nucleus sampling
+#       max_new_tokens: max codec tokens
+#     """
+#     if tts_design is None:
+#         raise HTTPException(503, "Voice-design model not loaded. Restart with MODEL_MODE=design.")
+#     if not text.strip():
+#         raise HTTPException(400, "text cannot be empty")
+#     if not instruct.strip():
+#         raise HTTPException(400, "instruct cannot be empty — describe the voice you want")
 
-    try:
-        wavs, fs = tts_design.generate_voice_design(
-            text=text,
-            instruct=instruct,
-            language=language,
-            temperature=temperature,
-            top_p=top_p,
-            max_new_tokens=max_new_tokens,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+#     try:
+#         wavs, fs = tts_design.generate_voice_design(
+#             text=text,
+#             instruct=instruct,
+#             language=language,
+#             temperature=temperature,
+#             top_p=top_p,
+#             max_new_tokens=max_new_tokens,
+#         )
+#     except ValueError as e:
+#         raise HTTPException(400, str(e))
 
-    buf = wav_to_bytes(wavs[0], fs)
-    return StreamingResponse(
-        buf,
-        media_type="audio/wav",
-        headers={"Content-Disposition": 'attachment; filename="output.wav"'},
-    )
+#     buf = wav_to_bytes(wavs[0], fs)
+#     return StreamingResponse(
+#         buf,
+#         media_type="audio/wav",
+#         headers={"Content-Disposition": 'attachment; filename="output.wav"'},
+#     )
 
 
 @app.get("/info")
@@ -327,13 +327,13 @@ def info_custom():
     }
 
 
-@app.get("/info/design")
-def info_design():
-    """Returns info for the voice-design model."""
-    if tts_design is None:
-        raise HTTPException(503, "Voice-design model not loaded yet")
-    return {
-        "model_type": getattr(tts_design.model, "tts_model_type", "unknown"),
-        "supported_languages": tts_design.get_supported_languages(),
-        "supported_speakers": tts_design.get_supported_speakers(),
-    }
+# @app.get("/info/design")
+# def info_design():
+#     """Returns info for the voice-design model."""
+#     if tts_design is None:
+#         raise HTTPException(503, "Voice-design model not loaded yet")
+#     return {
+#         "model_type": getattr(tts_design.model, "tts_model_type", "unknown"),
+#         "supported_languages": tts_design.get_supported_languages(),
+#         "supported_speakers": tts_design.get_supported_speakers(),
+#     }
