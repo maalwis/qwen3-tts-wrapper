@@ -31,10 +31,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Force CPU-only torch + torchaudio (no CUDA wheels)
 RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-# Copy source & install package
-COPY qwen_tts /app/qwen_tts
-COPY api_server.py /app/api_server.py
-
 # Install your package + its deps from pyproject.toml
 RUN pip install --no-cache-dir .
 RUN pip check
@@ -71,4 +67,6 @@ RUN chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
-CMD ["uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "8000"]
+
+ENTRYPOINT ["uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD []
